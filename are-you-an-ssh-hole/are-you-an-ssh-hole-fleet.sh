@@ -19,7 +19,9 @@
 #   --user U       ssh login user for hosts given without user@
 #   --identity K   ssh identity file
 #   --timeout S    ssh connect timeout seconds (default 10)
-#   --out DIR      save each host's full audit output to DIR/<host>.txt
+#   --out DIR      save each host's full audit output to DIR/<host>.{txt,json}
+#   --json         emit one aggregated JSON report (summary + per-host records)
+#                  instead of the human-readable table
 #
 # Exit: 0 all clear · 1 at least one VULNERABLE · 2 some NEEDS_REVIEW/UNREACHABLE/ERROR
 #
@@ -56,6 +58,11 @@ fleet_exit_code() {
     else echo 0; fi
 }
 
+# Escape a string for a JSON double-quoted value.
+json_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\r' | tr '\n\t' '  '
+}
+
 # ----- main ------------------------------------------------------------------
 
 main() {
@@ -63,10 +70,11 @@ main() {
     AUDIT="$here/are-you-an-ssh-hole.sh"
     [ -r "$AUDIT" ] || { echo "cannot find are-you-an-ssh-hole.sh next to this script" >&2; exit 3; }
 
-    HOSTS=""; SUDO=""; JOBS=10; SSH_USER=""; IDENTITY=""; TIMEOUT=10; OUTDIR=""
+    HOSTS=""; SUDO=""; JOBS=10; SSH_USER=""; IDENTITY=""; TIMEOUT=10; OUTDIR=""; FMT=text
     while [ $# -gt 0 ]; do
         case "$1" in
             --hosts)    HOSTS="$HOSTS $(read_hosts < "$2")"; shift 2 ;;
+            --json)     FMT=json; shift ;;
             --sudo)     SUDO="sudo -n "; shift ;;
             --jobs)     JOBS="$2"; shift 2 ;;
             --user)     SSH_USER="$2"; shift 2 ;;
@@ -85,7 +93,8 @@ main() {
     SSH_OPTS="-o BatchMode=yes -o ConnectTimeout=$TIMEOUT"
     [ -n "$SSH_USER" ] && SSH_OPTS="$SSH_OPTS -l $SSH_USER"
     [ -n "$IDENTITY" ] && SSH_OPTS="$SSH_OPTS -i $IDENTITY"
-    REMOTE_CMD="${SUDO}sh -s"
+    if [ "$FMT" = json ]; then REMOTE_CMD="${SUDO}sh -s -- --json"; OUTEXT=json
+    else REMOTE_CMD="${SUDO}sh -s"; OUTEXT=txt; fi
 
     RESDIR=$(mktemp -d)
     trap 'rm -rf "$RESDIR"' EXIT INT TERM
@@ -94,10 +103,23 @@ main() {
     for host in $HOSTS; do
         idx=$((idx+1))
         (
-            out=$(ssh $SSH_OPTS "$host" "$REMOTE_CMD" < "$AUDIT" 2>&1)
+            if [ "$FMT" = json ]; then
+                out=$(ssh $SSH_OPTS "$host" "$REMOTE_CMD" < "$AUDIT" 2>/dev/null)
+            else
+                out=$(ssh $SSH_OPTS "$host" "$REMOTE_CMD" < "$AUDIT" 2>&1)
+            fi
             rc=$?
-            printf '%s\t%s\n' "$host" "$(classify_rc "$rc")" > "$RESDIR/$idx.res"
-            [ -n "$OUTDIR" ] && printf '%s\n' "$out" > "$OUTDIR/$(echo "$host" | tr -c 'A-Za-z0-9._-' '_').txt"
+            status=$(classify_rc "$rc")
+            printf '%s\t%s\n' "$host" "$status" > "$RESDIR/$idx.res"
+            if [ "$FMT" = json ]; then
+                if printf '%s' "$out" | head -1 | grep -q '^{'; then
+                    printf '%s' "$out" > "$RESDIR/$idx.json"
+                else
+                    printf '{"host":"%s","verdict":"%s","evidence":null}' \
+                        "$(json_escape "$host")" "$status" > "$RESDIR/$idx.json"
+                fi
+            fi
+            [ -n "$OUTDIR" ] && printf '%s\n' "$out" > "$OUTDIR/$(echo "$host" | tr -c 'A-Za-z0-9._-' '_').$OUTEXT"
         ) &
         running=$((running+1))
         [ "$running" -ge "$JOBS" ] && { wait; running=0; }
@@ -105,21 +127,42 @@ main() {
     wait
 
     vuln=0; review=0; clear=0; bad=0
-    echo "sshole fleet audit"
-    echo "-------------------------------------------------"
     for f in "$RESDIR"/*.res; do
         [ -e "$f" ] || continue
-        host=$(cut -f1 "$f"); status=$(cut -f2 "$f")
-        printf '  %-36s %s\n' "$host" "$status"
-        case "$status" in
+        case "$(cut -f2 "$f")" in
             VULNERABLE)     vuln=$((vuln+1)) ;;
             NEEDS_REVIEW)   review=$((review+1)) ;;
             NOT_VULNERABLE) clear=$((clear+1)) ;;
             *)              bad=$((bad+1)) ;;
         esac
     done
-    echo "-------------------------------------------------"
-    echo "  vulnerable: $vuln   needs-review: $review   clear: $clear   unreachable/error: $bad"
+    total=$((vuln+review+clear+bad))
+
+    if [ "$FMT" = json ]; then
+        printf '{\n'
+        printf '  "schema": "are-you-an-ssh-hole-fleet/v1",\n'
+        printf '  "generated_at": "%s",\n' "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)"
+        printf '  "summary": {"total": %s, "vulnerable": %s, "needs_review": %s, "not_vulnerable": %s, "unreachable_or_error": %s},\n' \
+            "$total" "$vuln" "$review" "$clear" "$bad"
+        printf '  "hosts": [\n'
+        first=1
+        for f in "$RESDIR"/*.json; do
+            [ -e "$f" ] || continue
+            [ "$first" = 1 ] || printf ',\n'
+            first=0
+            sed 's/^/    /' "$f"
+        done
+        printf '\n  ]\n}\n'
+    else
+        echo "sshole fleet audit"
+        echo "-------------------------------------------------"
+        for f in "$RESDIR"/*.res; do
+            [ -e "$f" ] || continue
+            printf '  %-36s %s\n' "$(cut -f1 "$f")" "$(cut -f2 "$f")"
+        done
+        echo "-------------------------------------------------"
+        echo "  vulnerable: $vuln   needs-review: $review   clear: $clear   unreachable/error: $bad"
+    fi
 
     exit "$(fleet_exit_code "$vuln" "$review" "$bad")"
 }

@@ -74,10 +74,43 @@ treat any such host as compromised.
 
 ```sh
 ./are-you-an-ssh-hole.sh              # full audit (run as root for a definitive shadow read)
+./are-you-an-ssh-hole.sh --json       # same audit as a machine-readable JSON record
 ./are-you-an-ssh-hole.sh --crypt-probe   # just the isolated crypt() behavior check
 ```
 
 Exit codes: `0` NOT_VULNERABLE · `1` VULNERABLE · `2` NEEDS_REVIEW.
+
+### JSON report
+
+`--json` emits one record (`schema: are-you-an-ssh-hole/v1`) with the verdict
+and the evidence behind it, suitable for aggregation:
+
+```json
+{
+  "schema": "are-you-an-ssh-hole/v1",
+  "tool": "are-you-an-ssh-hole",
+  "cve": "CVE-2026-123158",
+  "generated_at": "2026-11-07T00:00:00Z",
+  "host": "web1",
+  "verdict": "VULNERABLE",
+  "evidence": {
+    "libc": "musl",
+    "sshd_present": true,
+    "sshd_version": "OpenSSH_10.3p1, ...",
+    "openssh_fix_status": "unpatched",
+    "crypt_returns_star": "yes",
+    "shadow_readable": true,
+    "star_accounts": ["root", "deploy"],
+    "star_account_count": 2,
+    "sha_donor_account_count": 3,
+    "pam": "not_shielded"
+  }
+}
+```
+
+The fleet runner's `--json` wraps these into one report
+(`schema: are-you-an-ssh-hole-fleet/v1`) with a `summary` (counts) and a
+`hosts` array — your fleet-wide "what still needs patching" view.
 
 ## Fleet audit
 
@@ -91,6 +124,7 @@ the safe local detector over access you hold.
 ```sh
 ./are-you-an-ssh-hole-fleet.sh host1 user@host2
 ./are-you-an-ssh-hole-fleet.sh --hosts hosts.txt --sudo --jobs 20 --out results/
+./are-you-an-ssh-hole-fleet.sh --hosts hosts.txt --sudo --json > report.json
 ```
 
 `--sudo` runs the remote audit under `sudo -n` (needs passwordless sudo) for a
