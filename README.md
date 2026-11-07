@@ -5,7 +5,7 @@
 
 # are-you-an-ssh-hole
 
-[![ci](https://github.com/Hoffamania/take_home_test/actions/workflows/ci.yml/badge.svg)](https://github.com/Hoffamania/take_home_test/actions/workflows/ci.yml)
+[![ci](https://github.com/Hoffamania/are-you-an-ssh-hole/actions/workflows/ci.yml/badge.svg)](https://github.com/Hoffamania/are-you-an-ssh-hole/actions/workflows/ci.yml)
 
 A **local** detector for *sshole* ([**CVE-2026-123158**](https://nvd.nist.gov/vuln/detail/CVE-2026-123158)),
 the OpenSSH authentication bypass on musl-based Linux. On musl libc (Alpine,
