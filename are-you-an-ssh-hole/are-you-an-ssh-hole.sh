@@ -63,8 +63,11 @@ scan_sha_accounts() {
     echo "$n"
 }
 
-# Reproduce the defect in isolation: does crypt(<password over 256 bytes>, "*")
-# return "*"? That return value is exactly what makes a "*" account match.
+# Reproduce the defect in isolation. sshd hashes the candidate password against
+# a borrowed real SHA-512 ($6$) salt (the CVE-2016-6210 time-equalising path).
+# On musl, sha512crypt refuses a password over 256 bytes and crypt() returns the
+# string "*", which then matches a "*" shadow field. So: does
+# crypt(<password over 256 bytes>, "$6$...") return "*"?
 # Prints: yes | no | unknown
 crypt_returns_star() {
     long=$(printf 'A%.0s' $(seq 1 300))
@@ -75,7 +78,7 @@ try:
     import crypt
 except Exception:
     sys.exit(42)
-r = crypt.crypt(sys.argv[1], "*")
+r = crypt.crypt(sys.argv[1], "$6$abcdefgh")
 print("yes" if r == "*" else "no")
 PY
     fi
@@ -94,7 +97,7 @@ PY
 int main(void){
     char pw[301];
     memset(pw,'A',300); pw[300]='\0';      /* > 256 bytes */
-    char *r = crypt(pw, "*");               /* salt is the locked-account field */
+    char *r = crypt(pw, "$6$abcdefgh");     /* a real SHA-512 donor salt */
     if(!r){ printf("no\n"); return 0; }     /* NULL cannot match "*" */
     printf("%s\n", strcmp(r,"*")==0 ? "yes" : "no");
     return 0;
@@ -222,7 +225,7 @@ compute_verdict() {
 
 main() {
     if [ "${1:-}" = "--crypt-probe" ]; then
-        echo "crypt(<300 bytes>, \"*\") returns \"*\": $(crypt_returns_star)"
+        echo "crypt(<300 bytes>, \"\$6\$...\") returns \"*\": $(crypt_returns_star)"
         exit 0
     fi
 

@@ -37,7 +37,7 @@ Not affected: glibc/libxcrypt, PAM-enabled sshd, Dropbear, non-Linux.
 | Signal | How |
 |--------|-----|
 | libc is musl | `/lib/ld-musl-*.so.1`, `ldd --version` |
-| `crypt()` defect present | reproduces `crypt(<300 bytes>, "*") == "*"` in isolation |
+| `crypt()` defect present | reproduces `crypt(<300 bytes>, "$6$...") == "*"` in isolation (sha512crypt refusing the over-long password) |
 | OpenSSH patched | Alpine: `apk version` vs the per-branch fixed version; else upstream vs `10.6p2` |
 | `*` account exposed | `/etc/shadow` fields equal to exactly `*` (not `!`, `!!`, `*0`, a hash) |
 | SHA donor account | any `$5$`/`$6$` account in `/etc/shadow` |
