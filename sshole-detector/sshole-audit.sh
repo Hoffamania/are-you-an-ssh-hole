@@ -48,6 +48,21 @@ scan_star_accounts() {
     done < "$f"
 }
 
+# Prints the number of accounts with a SHA-256 ($5$) or SHA-512 ($6$) hash.
+# These supply the "donor" salt sshd borrows for a "*" account, so at least one
+# must exist for the bypass to trigger (Orca disclosure). Reads $1 or /etc/shadow.
+scan_sha_accounts() {
+    f="${1:-/etc/shadow}"
+    [ -r "$f" ] || { echo "__UNREADABLE__"; return; }
+    n=0
+    while IFS=: read -r user field rest; do
+        case "$field" in
+            '$5$'*|'$6$'*) n=$((n+1)) ;;
+        esac
+    done < "$f"
+    echo "$n"
+}
+
 # Reproduce the defect in isolation: does crypt(<password over 256 bytes>, "*")
 # return "*"? That return value is exactly what makes a "*" account match.
 # Prints: yes | no | unknown
@@ -112,12 +127,53 @@ detect_pam_shield() {
     fi
 }
 
+# Is the OpenSSH fix applied? The fix is in OpenSSH, not musl, so a patched host
+# still has musl returning "*". On Alpine, fixes are backported, so compare the
+# installed apk version against the per-branch fixed version with apk's own
+# comparator. Elsewhere, compare the upstream version against 10.6p2.
+# Prints: patched | unpatched | unknown
+openssh_fix_status() {
+    if [ -f /etc/alpine-release ] && command -v apk >/dev/null 2>&1; then
+        rel=$(cat /etc/alpine-release 2>/dev/null)
+        branch=$(echo "$rel" | grep -oE '^[0-9]+\.[0-9]+' | head -1)
+        inst=$(apk list -I openssh 2>/dev/null | grep -oE 'openssh-[^ ]+' | head -1 | sed 's/^openssh-//')
+        [ -z "$inst" ] && { echo unknown; return; }
+        case "$branch" in
+            3.24) fixed=10.3_p1-r2 ;;
+            3.23) fixed=10.2_p1-r1 ;;
+            3.22) fixed=10.0_p1-r11 ;;
+            3.21) fixed=9.9_p2-r1 ;;
+            3.20) fixed=9.7_p1-r6 ;;
+            *)    if echo "$rel" | grep -qi edge; then fixed=10.6_p2-r0
+                  else echo unknown; return; fi ;;
+        esac
+        case "$(apk version -t "$inst" "$fixed" 2>/dev/null)" in
+            '<')     echo unpatched ;;
+            '='|'>') echo patched ;;
+            *)       echo unknown ;;
+        esac
+        return
+    fi
+    # Non-Alpine musl: compare upstream OpenSSH version against 10.6p2.
+    v=$(get_sshd_version | grep -oiE 'OpenSSH_[0-9]+\.[0-9]+(p[0-9]+)?' | head -1 | sed 's/OpenSSH_//I')
+    [ -z "$v" ] && { echo unknown; return; }
+    maj=$(echo "$v" | cut -d. -f1)
+    min=$(echo "$v" | sed -E 's/^[0-9]+\.([0-9]+).*/\1/')
+    p=$(echo "$v" | grep -oE 'p[0-9]+' | tr -d p); p=${p:-0}
+    { [ "$maj" -gt 10 ]; } 2>/dev/null && { echo patched; return; }
+    { [ "$maj" -lt 10 ]; } 2>/dev/null && { echo unpatched; return; }
+    { [ "$min" -gt 6 ]; } 2>/dev/null && { echo patched; return; }
+    { [ "$min" -lt 6 ]; } 2>/dev/null && { echo unpatched; return; }
+    { [ "$p" -ge 2 ]; } 2>/dev/null && echo patched || echo unpatched
+}
+
 # ----- verdict (pure function of the facts; unit-tested) ---------------------
-# Args: libc  crypt_star(yes|no|unknown)  star_accounts(count or __UNREADABLE__)
-#       sshd_present(yes|no)  pam(shielded|not_shielded|unknown)
+# Args: libc  crypt_star(yes|no|unknown)  star_accounts(count|__UNREADABLE__)
+#       sha_accounts(count|__UNREADABLE__)  sshd_present(yes|no)
+#       pam(shielded|not_shielded|unknown)  fix(patched|unpatched|unknown)
 # Prints RESULT token on stdout; sets no globals.
 compute_verdict() {
-    _libc="$1"; _crypt="$2"; _accounts="$3"; _sshd="$4"; _pam="$5"
+    _libc="$1"; _crypt="$2"; _star="$3"; _sha="$4"; _sshd="$5"; _pam="$6"; _fix="$7"
 
     # Definitively safe: the core crypt "*" defect is absent.
     if [ "$_crypt" = "no" ] || [ "$_libc" = "glibc" ]; then
@@ -127,17 +183,30 @@ compute_verdict() {
     if [ "$_libc" != "musl" ] || [ "$_crypt" = "unknown" ]; then
         echo NEEDS_REVIEW; return
     fi
-    # Here: musl + crypt returns "*".
-    if [ "$_accounts" = "__UNREADABLE__" ]; then
-        echo NEEDS_REVIEW; return
-    fi
-    if [ "$_accounts" = "0" ] || [ "$_sshd" = "no" ]; then
+    # musl + crypt returns "*". The OpenSSH patch is authoritative.
+    if [ "$_fix" = "patched" ]; then
         echo NOT_VULNERABLE; return
     fi
+    if [ "$_sshd" = "no" ]; then
+        echo NOT_VULNERABLE; return
+    fi
+    if [ "$_star" = "__UNREADABLE__" ] || [ "$_sha" = "__UNREADABLE__" ]; then
+        echo NEEDS_REVIEW; return
+    fi
+    # Both a "*" account and a SHA-256/512 donor account are required.
+    if [ "$_star" = "0" ] || [ "$_sha" = "0" ]; then
+        echo NOT_VULNERABLE; return
+    fi
+    # PAM detection is heuristic, so flag rather than clear.
     if [ "$_pam" = "shielded" ]; then
         echo NEEDS_REVIEW; return
     fi
-    echo VULNERABLE
+    # All conditions hold; verdict hinges on whether the patch is confirmed.
+    if [ "$_fix" = "unpatched" ]; then
+        echo VULNERABLE
+    else
+        echo NEEDS_REVIEW
+    fi
 }
 
 # ----- main ------------------------------------------------------------------
@@ -152,26 +221,35 @@ main() {
     sshver=$(get_sshd_version)
     [ -n "$sshver" ] && sshd_present=yes || sshd_present=no
     crypt_star=$(crypt_returns_star)
-    accounts_raw=$(scan_star_accounts)
+    star_raw=$(scan_star_accounts)
+    sha_count=$(scan_sha_accounts)
     pam=$(detect_pam_shield)
+    fix=$(openssh_fix_status)
 
-    if [ "$accounts_raw" = "__UNREADABLE__" ]; then
-        acct_count=__UNREADABLE__
-        acct_note="/etc/shadow not readable (run as root for a definitive result)"
+    if [ "$star_raw" = "__UNREADABLE__" ]; then
+        star_count=__UNREADABLE__
+        star_note="/etc/shadow not readable (run as root for a definitive result)"
     else
-        acct_count=$(printf '%s\n' "$accounts_raw" | grep -c . || true)
-        acct_note="$acct_count account(s) with a '*' password field"
+        star_count=$(printf '%s\n' "$star_raw" | grep -c . || true)
+        star_note="$star_count account(s) with a '*' password field"
+    fi
+    if [ "$sha_count" = "__UNREADABLE__" ]; then
+        sha_note="(shadow unreadable)"
+    else
+        sha_note="$sha_count account(s) with a SHA-256/512 hash (donor salt)"
     fi
 
-    result=$(compute_verdict "$libc" "$crypt_star" "$acct_count" "$sshd_present" "$pam")
+    result=$(compute_verdict "$libc" "$crypt_star" "$star_count" "$sha_count" "$sshd_present" "$pam" "$fix")
 
     echo "sshole audit"
     echo "  libc:                $libc"
     echo "  sshd:                ${sshver:-not found}"
+    echo "  OpenSSH fix status:  $fix"
     echo "  crypt returns '*':   $crypt_star"
-    echo "  '*' accounts:        $acct_note"
-    [ "$acct_count" != "__UNREADABLE__" ] && [ "$acct_count" != "0" ] && \
-        printf '                       %s\n' $accounts_raw
+    echo "  '*' accounts:        $star_note"
+    [ "$star_count" != "__UNREADABLE__" ] && [ "$star_count" != "0" ] && \
+        printf '                       %s\n' $star_raw
+    echo "  SHA donor accounts:  $sha_note"
     echo "  PAM path:            $pam"
     echo "  RESULT:              $result"
 
