@@ -8,7 +8,9 @@ limit. An account whose `/etc/shadow` field is `*` (meant to be unmatchable)
 then *matches* that return value, and non-PAM `sshd` accepts the login. On
 Alpine this exposes `root` (3.16+).
 
-No CVE was assigned as of disclosure. No in-the-wild exploitation reported.
+Tracked as [CVE-2026-123158](https://nvd.nist.gov/vuln/detail/CVE-2026-123158)
+(CVSS 8.1 High, CWE-394). **Actively exploited in the wild** — root access was
+confirmed on an Alpine honeypot within hours of disclosure, so patch urgently.
 
 ## What it does — and does not do
 
