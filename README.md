@@ -1,7 +1,7 @@
 <p align="center">
   <img src="assets/logo.svg" width="120" alt="are-you-an-ssh-hole logo">
 </p>
-<p align="center"><sub>Asterisk motif inspired by <a href="https://axelhow.com/2013/01/19/vonnegut-asterisk/">Kurt Vonnegut's asterisk</a> in <i>A Man Without a Country</i> — original artwork, not a reproduction.</sub></p>
+<p align="center"><sub>Asterisk motif inspired by <a href="https://axelhow.com/2013/01/19/vonnegut-asterisk/">Kurt Vonnegut's asterisk</a> in <i>Breakfast of Champions,</i> — original artwork, not a reproduction.</sub></p>
 
 # are-you-an-ssh-hole
 
