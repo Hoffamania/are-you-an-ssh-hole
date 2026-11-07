@@ -1,4 +1,4 @@
-# sshole-detector
+# are-you-an-ssh-hole
 
 A **local** detector for *sshole, the OpenSSH authentication bypass on
 musl-based Linux ([Orca Security disclosure][orca]). On musl libc (Alpine,
