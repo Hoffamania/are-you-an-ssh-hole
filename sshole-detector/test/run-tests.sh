@@ -6,6 +6,7 @@ set -u
 
 here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
 SSHOLE_LIB=1 . "$here/../sshole-audit.sh"
+SSHOLE_LIB=1 . "$here/../sshole-fleet.sh"
 
 pass=0; fail=0
 check() { # desc  expected  actual
@@ -65,6 +66,24 @@ check "'!' and '*0' are not treated as '*'" "" "$got"
 
 got=$(scan_star_accounts "$tmp/does_not_exist")
 check "unreadable shadow reports sentinel" "__UNREADABLE__" "$got"
+
+# --- fleet helpers ---
+check "rc 0 -> NOT_VULNERABLE" NOT_VULNERABLE "$(classify_rc 0)"
+check "rc 1 -> VULNERABLE"     VULNERABLE     "$(classify_rc 1)"
+check "rc 2 -> NEEDS_REVIEW"   NEEDS_REVIEW   "$(classify_rc 2)"
+check "rc 255 -> UNREACHABLE"  UNREACHABLE    "$(classify_rc 255)"
+check "rc 127 -> ERROR"        ERROR          "$(classify_rc 127)"
+
+cat > "$tmp/hosts.txt" <<'EOF'
+# fleet hosts
+web1.example.com
+  user@web2.example.com   # trailing comment
+
+db1.example.com
+EOF
+got=$(read_hosts < "$tmp/hosts.txt" | tr '\n' ',')
+check "host file parse strips comments/blanks/space" \
+    "web1.example.com,user@web2.example.com,db1.example.com," "$got"
 rm -rf "$tmp"
 
 echo "-------------------------------------"
