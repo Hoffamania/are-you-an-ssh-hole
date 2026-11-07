@@ -1,3 +1,8 @@
+<p align="center">
+  <img src="assets/logo.svg" width="120" alt="are-you-an-ssh-hole logo">
+</p>
+<p align="center"><sub>Asterisk motif inspired by <a href="https://axelhow.com/2013/01/19/vonnegut-asterisk/">Kurt Vonnegut's asterisk</a> in <i>A Man Without a Country</i> — original artwork, not a reproduction.</sub></p>
+
 # are-you-an-ssh-hole
 
 [![ci](https://github.com/Hoffamania/take_home_test/actions/workflows/ci.yml/badge.svg)](https://github.com/Hoffamania/take_home_test/actions/workflows/ci.yml)
@@ -50,3 +55,4 @@ containers: the `crypt()` defect must be present on musl and absent on glibc.
 - OpenSSH patches: [SecurityWeek](https://www.securityweek.com/openssh-rushes-patches-for-sshole-authentication-bypass/)
 - In-the-wild exploitation: [The Hacker News](https://thehackernews.com/2026/11/hackers-exploited-openssh-sshole-flaw.html) · [Help Net Security](https://www.helpnetsecurity.com/2026/11/06/openssh-sshole-cve-2026-123158-exploitation/)
 - Related root cause: [CVE-2016-6210](https://nvd.nist.gov/vuln/detail/CVE-2016-6210) (username enumeration; its fix introduced the salt-borrowing path)
+- Logo inspiration: [Kurt Vonnegut's asterisk](https://axelhow.com/2013/01/19/vonnegut-asterisk/) (*A Man Without a Country*) — the logo is original artwork, not a reproduction
