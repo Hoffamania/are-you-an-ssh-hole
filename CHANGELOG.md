@@ -36,4 +36,4 @@ OpenSSH authentication bypass on musl-based Linux.
   no authentication against any host. There is no remote-probe or exploitation
   mode.
 
-[1.0.0]: https://github.com/Hoffamania/take_home_test/releases/tag/v1.0.0
+[1.0.0]: https://github.com/Hoffamania/are-you-an-ssh-hole/releases/tag/v1.0.0
