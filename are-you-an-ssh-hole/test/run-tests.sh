@@ -117,6 +117,27 @@ sh "$here/../are-you-an-ssh-hole.sh" >/dev/null 2>&1; rc=$?
 case "$rc" in 0|1|2) ok=yes ;; *) ok=no ;; esac
 check "full audit exits with a valid verdict code (0/1/2)" yes "$ok"
 
+# --- JSON escaping (pure) ---
+check "json_escape handles quotes and backslashes" 'a\"b\\c' "$(json_escape 'a"b\c')"
+check "json_str_array of empty input is []" "[]" "$(printf '' | json_str_array)"
+check "json_str_array builds a JSON array" '["root","deploy"]' "$(printf 'root\ndeploy\n' | json_str_array)"
+
+# --- JSON report output (needs python3 to validate) ---
+if command -v python3 >/dev/null 2>&1; then
+    aud="$here/../are-you-an-ssh-hole.sh"
+    jtext=$(sh "$aud" --json)
+    printf '%s' "$jtext" | python3 -c "import json,sys; json.load(sys.stdin)" 2>/dev/null
+    check "audit --json is valid JSON" 0 "$?"
+    v=$(printf '%s' "$jtext" | python3 -c "import json,sys; print(json.load(sys.stdin)['verdict'])" 2>/dev/null)
+    sh "$aud" >/dev/null 2>&1; rc=$?
+    case "$rc" in 0) e=NOT_VULNERABLE;; 1) e=VULNERABLE;; 2) e=NEEDS_REVIEW;; *) e=ERROR;; esac
+    check "audit --json verdict matches exit code" "$e" "$v"
+    sch=$(printf '%s' "$jtext" | python3 -c "import json,sys; print(json.load(sys.stdin)['schema'])" 2>/dev/null)
+    check "audit --json carries schema id" "are-you-an-ssh-hole/v1" "$sch"
+else
+    echo "(python3 not found; skipping JSON validation tests)"
+fi
+
 echo "-------------------------------------"
 echo "passed: $pass   failed: $fail"
 [ "$fail" -eq 0 ]

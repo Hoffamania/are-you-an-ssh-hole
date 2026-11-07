@@ -30,7 +30,8 @@ non-PAM `sshd` accepts the login. On Alpine this exposes `root` (3.16+).
 
 ```sh
 are-you-an-ssh-hole/are-you-an-ssh-hole.sh          # audit this host
-are-you-an-ssh-hole/are-you-an-ssh-hole-fleet.sh --hosts hosts.txt --sudo
+are-you-an-ssh-hole/are-you-an-ssh-hole.sh --json   # machine-readable record
+are-you-an-ssh-hole/are-you-an-ssh-hole-fleet.sh --hosts hosts.txt --sudo --json > report.json
 ```
 
 ## Detect, don't exploit

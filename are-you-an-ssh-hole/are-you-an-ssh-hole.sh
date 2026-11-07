@@ -221,6 +221,20 @@ compute_verdict() {
     fi
 }
 
+# ----- JSON helpers ----------------------------------------------------------
+
+# Escape a string for use inside a JSON double-quoted value.
+json_escape() {
+    printf '%s' "$1" | sed -e 's/\\/\\\\/g' -e 's/"/\\"/g' | tr -d '\r' | tr '\n\t' '  '
+}
+
+# Read newline-separated items on stdin, print a JSON array of strings.
+# Empty input (or only blank lines) yields [].
+json_str_array() {
+    awk '{ if ($0 != "") { gsub(/\\/,"\\\\"); gsub(/"/,"\\\""); a[++n]="\"" $0 "\"" } }
+         END { s="["; for (i=1;i<=n;i++) s=s (i>1?",":"") a[i]; print s "]" }'
+}
+
 # ----- main ------------------------------------------------------------------
 
 main() {
@@ -228,6 +242,9 @@ main() {
         echo "crypt(<300 bytes>, \"\$6\$...\") returns \"*\": $(crypt_returns_star)"
         exit 0
     fi
+
+    fmt=text
+    [ "${1:-}" = "--json" ] && fmt=json
 
     libc=$(detect_libc)
     sshver=$(get_sshd_version)
@@ -240,30 +257,68 @@ main() {
 
     if [ "$star_raw" = "__UNREADABLE__" ]; then
         star_count=__UNREADABLE__
-        star_note="/etc/shadow not readable (run as root for a definitive result)"
     else
         star_count=$(printf '%s\n' "$star_raw" | grep -c . || true)
-        star_note="$star_count account(s) with a '*' password field"
-    fi
-    if [ "$sha_count" = "__UNREADABLE__" ]; then
-        sha_note="(shadow unreadable)"
-    else
-        sha_note="$sha_count account(s) with a SHA-256/512 hash (donor salt)"
     fi
 
     result=$(compute_verdict "$libc" "$crypt_star" "$star_count" "$sha_count" "$sshd_present" "$pam" "$fix")
 
-    echo "sshole audit"
-    echo "  libc:                $libc"
-    echo "  sshd:                ${sshver:-not found}"
-    echo "  OpenSSH fix status:  $fix"
-    echo "  crypt returns '*':   $crypt_star"
-    echo "  '*' accounts:        $star_note"
-    [ "$star_count" != "__UNREADABLE__" ] && [ "$star_count" != "0" ] && \
-        printf '                       %s\n' $star_raw
-    echo "  SHA donor accounts:  $sha_note"
-    echo "  PAM path:            $pam"
-    echo "  RESULT:              $result"
+    if [ "$fmt" = json ]; then
+        [ "$sshd_present" = yes ] && sp=true || sp=false
+        if [ -n "$sshver" ]; then sshver_json="\"$(json_escape "$sshver")\""; else sshver_json=null; fi
+        if [ "$star_raw" = "__UNREADABLE__" ]; then
+            shadow_readable=false; star_json=null; starc_json=null; shac_json=null
+        else
+            shadow_readable=true
+            star_json=$(printf '%s\n' "$star_raw" | json_str_array)
+            starc_json=$star_count
+            shac_json=$sha_count
+        fi
+        cat <<JSON
+{
+  "schema": "are-you-an-ssh-hole/v1",
+  "tool": "are-you-an-ssh-hole",
+  "cve": "CVE-2026-123158",
+  "generated_at": "$(date -u +%Y-%m-%dT%H:%M:%SZ 2>/dev/null)",
+  "host": "$(json_escape "$(uname -n 2>/dev/null)")",
+  "verdict": "$result",
+  "evidence": {
+    "libc": "$libc",
+    "sshd_present": $sp,
+    "sshd_version": $sshver_json,
+    "openssh_fix_status": "$fix",
+    "crypt_returns_star": "$crypt_star",
+    "shadow_readable": $shadow_readable,
+    "star_accounts": $star_json,
+    "star_account_count": $starc_json,
+    "sha_donor_account_count": $shac_json,
+    "pam": "$pam"
+  }
+}
+JSON
+    else
+        if [ "$star_raw" = "__UNREADABLE__" ]; then
+            star_note="/etc/shadow not readable (run as root for a definitive result)"
+        else
+            star_note="$star_count account(s) with a '*' password field"
+        fi
+        if [ "$sha_count" = "__UNREADABLE__" ]; then
+            sha_note="(shadow unreadable)"
+        else
+            sha_note="$sha_count account(s) with a SHA-256/512 hash (donor salt)"
+        fi
+        echo "sshole audit"
+        echo "  libc:                $libc"
+        echo "  sshd:                ${sshver:-not found}"
+        echo "  OpenSSH fix status:  $fix"
+        echo "  crypt returns '*':   $crypt_star"
+        echo "  '*' accounts:        $star_note"
+        [ "$star_count" != "__UNREADABLE__" ] && [ "$star_count" != "0" ] && \
+            printf '                       %s\n' $star_raw
+        echo "  SHA donor accounts:  $sha_note"
+        echo "  PAM path:            $pam"
+        echo "  RESULT:              $result"
+    fi
 
     case "$result" in
         VULNERABLE)     exit 1 ;;
