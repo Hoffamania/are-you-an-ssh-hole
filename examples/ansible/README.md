@@ -17,6 +17,11 @@ Each host prints a verdict, and the play **fails for any host that is
 `VULNERABLE`** — so a non-zero playbook exit means at least one host needs
 patching, which is handy in CI or a cron job.
 
+To just **collect a report without failing** on vulnerable hosts (so the run
+completes cleanly across the whole fleet), pass
+`-e sshole_fail_on_vulnerable=false`. The report is written either way — the
+switch only controls whether the play exits non-zero.
+
 ### Aggregated report
 
 The run also writes one JSON report on the control node (default

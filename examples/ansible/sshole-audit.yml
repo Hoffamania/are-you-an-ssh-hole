@@ -4,6 +4,7 @@
 #
 #   ansible-playbook -i inventory.ini sshole-audit.yml
 #   ansible-playbook -i inventory.ini sshole-audit.yml -e sshole_report=/tmp/report.json
+#   ansible-playbook -i inventory.ini sshole-audit.yml -e sshole_fail_on_vulnerable=false
 #
 # It uses the `script` module, which transfers the audit and runs it on each
 # host, so it works even on minimal Alpine images that have no Python (standard
@@ -18,7 +19,9 @@
 #   - a per-host verdict line,
 #   - an aggregated report written on the control node (default sshole-report.json),
 #     schema are-you-an-ssh-hole-fleet/v1, with a summary and a hosts array,
-#   - a non-zero exit if any host is VULNERABLE (the play fails for those hosts).
+#   - a non-zero exit if any host is VULNERABLE (the play fails for those hosts),
+#     unless -e sshole_fail_on_vulnerable=false, which lets the run finish 0 and
+#     still writes the report.
 # Hosts that are unreachable over SSH appear in Ansible's run recap as
 # "unreachable" rather than in the report (no task can run on them).
 - name: Audit hosts for sshole (CVE-2026-123158)
@@ -28,6 +31,10 @@
   vars:
     sshole_install_crypt_helper: false
     sshole_report: sshole-report.json
+    # Set to false to keep the play from failing on VULNERABLE hosts, so a run
+    # across the whole fleet completes and still writes the report:
+    #   -e sshole_fail_on_vulnerable=false
+    sshole_fail_on_vulnerable: true
   tasks:
     - name: Optionally install a crypt() helper for a definitive musl result
       when: sshole_install_crypt_helper | bool
@@ -83,6 +90,7 @@
           } | to_nice_json }}
 
     - name: Flag vulnerable hosts (fails the play for those hosts)
+      when: sshole_fail_on_vulnerable | bool
       ansible.builtin.assert:
         that: audit.rc | int != 1
         fail_msg: "{{ inventory_hostname }} is VULNERABLE to sshole (CVE-2026-123158) — patch now"
