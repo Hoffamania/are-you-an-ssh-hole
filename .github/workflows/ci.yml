@@ -1,0 +1,46 @@
+name: ci
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  unit:
+    name: unit + smoke tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Run test suite
+        run: sh are-you-an-ssh-hole/test/run-tests.sh
+
+  containers:
+    name: validate on real images
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      # musl: the crypt() defect that underpins the bypass must be present.
+      # (Patched OpenSSH does not change this — the fix is in sshd, not musl —
+      # so we assert the libc behavior, which is what the detector probes.)
+      - name: Alpine (musl) — crypt() returns "*" for an over-long password
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w alpine:3.20 sh -c '
+            apk add --no-cache gcc musl-dev >/dev/null
+            out=$(sh are-you-an-ssh-hole/are-you-an-ssh-hole.sh --crypt-probe)
+            echo "$out"
+            echo "$out" | grep -q ": yes$" || { echo "expected crypt defect present on musl"; exit 1; }
+            echo "--- full audit (informational) ---"
+            sh are-you-an-ssh-hole/are-you-an-ssh-hole.sh || true
+          '
+
+      # glibc: the defect is absent, so the detector must not false-positive.
+      - name: Debian (glibc) — no defect, audit reports NOT_VULNERABLE
+        run: |
+          docker run --rm -v "$PWD:/w" -w /w debian:bookworm-slim sh -c '
+            apt-get update -qq && apt-get install -y -qq gcc libc6-dev libcrypt-dev >/dev/null
+            out=$(sh are-you-an-ssh-hole/are-you-an-ssh-hole.sh --crypt-probe)
+            echo "$out"
+            echo "$out" | grep -q ": no$" || { echo "glibc should not exhibit the crypt defect"; exit 1; }
+            echo "--- full audit (expect NOT_VULNERABLE, exit 0) ---"
+            sh are-you-an-ssh-hole/are-you-an-ssh-hole.sh
+          '
