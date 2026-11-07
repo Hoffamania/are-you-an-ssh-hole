@@ -1,5 +1,5 @@
 #!/bin/sh
-# sshole-fleet.sh — run sshole-audit.sh across hosts you already administer.
+# are-you-an-ssh-hole-fleet.sh — run are-you-an-ssh-hole.sh across hosts you already administer.
 #
 # For each host it opens an SSH session WITH YOUR OWN CREDENTIALS (key-based;
 # BatchMode is forced on, so it can never fall back to sending a password),
@@ -8,9 +8,9 @@
 # anything — it only orchestrates the safe local detector over access you hold.
 #
 # Usage:
-#   ./sshole-fleet.sh host1 host2 user@host3
-#   ./sshole-fleet.sh --hosts hosts.txt
-#   ./sshole-fleet.sh --sudo --jobs 20 --hosts hosts.txt --out results/
+#   ./are-you-an-ssh-hole-fleet.sh host1 host2 user@host3
+#   ./are-you-an-ssh-hole-fleet.sh --hosts hosts.txt
+#   ./are-you-an-ssh-hole-fleet.sh --sudo --jobs 20 --hosts hosts.txt --out results/
 #
 # Options:
 #   --hosts FILE   read hosts from FILE (one per line; # comments and blanks ok)
@@ -48,12 +48,20 @@ read_hosts() {
     done
 }
 
+# Decide the overall exit code from the verdict counts.
+# Args: vuln review bad  ->  1 (any vuln) | 2 (any review/unreachable) | 0
+fleet_exit_code() {
+    if [ "$1" -gt 0 ]; then echo 1
+    elif [ "$2" -gt 0 ] || [ "$3" -gt 0 ]; then echo 2
+    else echo 0; fi
+}
+
 # ----- main ------------------------------------------------------------------
 
 main() {
     here=$(CDPATH= cd -- "$(dirname -- "$0")" && pwd)
-    AUDIT="$here/sshole-audit.sh"
-    [ -r "$AUDIT" ] || { echo "cannot find sshole-audit.sh next to this script" >&2; exit 3; }
+    AUDIT="$here/are-you-an-ssh-hole.sh"
+    [ -r "$AUDIT" ] || { echo "cannot find are-you-an-ssh-hole.sh next to this script" >&2; exit 3; }
 
     HOSTS=""; SUDO=""; JOBS=10; SSH_USER=""; IDENTITY=""; TIMEOUT=10; OUTDIR=""
     while [ $# -gt 0 ]; do
@@ -113,9 +121,7 @@ main() {
     echo "-------------------------------------------------"
     echo "  vulnerable: $vuln   needs-review: $review   clear: $clear   unreachable/error: $bad"
 
-    [ "$vuln" -gt 0 ] && exit 1
-    { [ "$review" -gt 0 ] || [ "$bad" -gt 0 ]; } && exit 2
-    exit 0
+    exit "$(fleet_exit_code "$vuln" "$review" "$bad")"
 }
 
 if [ "${SSHOLE_LIB:-}" != "1" ]; then

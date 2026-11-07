@@ -71,24 +71,24 @@ treat any such host as compromised.
 ## Usage
 
 ```sh
-./sshole-audit.sh              # full audit (run as root for a definitive shadow read)
-./sshole-audit.sh --crypt-probe   # just the isolated crypt() behavior check
+./are-you-an-ssh-hole.sh              # full audit (run as root for a definitive shadow read)
+./are-you-an-ssh-hole.sh --crypt-probe   # just the isolated crypt() behavior check
 ```
 
 Exit codes: `0` NOT_VULNERABLE · `1` VULNERABLE · `2` NEEDS_REVIEW.
 
 ## Fleet audit
 
-`sshole-fleet.sh` runs the local audit across hosts you already administer. For
+`are-you-an-ssh-hole-fleet.sh` runs the local audit across hosts you already administer. For
 each host it opens an SSH session **with your own credentials** (`BatchMode` is
 forced on, so it is key-based only and can never fall back to sending a
-password), pipes `sshole-audit.sh` in over stdin, runs it there, and aggregates
+password), pipes `are-you-an-ssh-hole.sh` in over stdin, runs it there, and aggregates
 the verdicts. It does no password probing and no bypass — it only orchestrates
 the safe local detector over access you hold.
 
 ```sh
-./sshole-fleet.sh host1 user@host2
-./sshole-fleet.sh --hosts hosts.txt --sudo --jobs 20 --out results/
+./are-you-an-ssh-hole-fleet.sh host1 user@host2
+./are-you-an-ssh-hole-fleet.sh --hosts hosts.txt --sudo --jobs 20 --out results/
 ```
 
 `--sudo` runs the remote audit under `sudo -n` (needs passwordless sudo) for a

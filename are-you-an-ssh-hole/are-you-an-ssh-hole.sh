@@ -1,5 +1,5 @@
 #!/bin/sh
-# sshole-audit.sh — local detector for the musl/OpenSSH "*"-password auth bypass.
+# are-you-an-ssh-hole.sh — local detector for the musl/OpenSSH "*"-password auth bypass.
 #
 # Runs ON a host and reports whether THAT host is in the vulnerable configuration.
 # It reads local config and reproduces the crypt() defect in isolation. It makes
@@ -127,6 +127,22 @@ detect_pam_shield() {
     fi
 }
 
+# version_is_patched VERSION_STRING -> patched | unpatched | unknown
+# Fixed point is upstream OpenSSH 10.6p2. Accepts "10.6p2" or a full banner
+# like "OpenSSH_10.3p1, OpenSSL ...". Pure: used by openssh_fix_status and tests.
+version_is_patched() {
+    v=$(printf '%s' "$1" | grep -oiE '[0-9]+\.[0-9]+(p[0-9]+)?' | head -1)
+    [ -z "$v" ] && { echo unknown; return; }
+    maj=$(echo "$v" | cut -d. -f1)
+    min=$(echo "$v" | sed -E 's/^[0-9]+\.([0-9]+).*/\1/')
+    p=$(echo "$v" | grep -oiE 'p[0-9]+' | tr -dc '0-9'); p=${p:-0}
+    { [ "$maj" -gt 10 ]; } 2>/dev/null && { echo patched; return; }
+    { [ "$maj" -lt 10 ]; } 2>/dev/null && { echo unpatched; return; }
+    { [ "$min" -gt 6 ]; } 2>/dev/null && { echo patched; return; }
+    { [ "$min" -lt 6 ]; } 2>/dev/null && { echo unpatched; return; }
+    { [ "$p" -ge 2 ]; } 2>/dev/null && echo patched || echo unpatched
+}
+
 # Is the OpenSSH fix applied? The fix is in OpenSSH, not musl, so a patched host
 # still has musl returning "*". On Alpine, fixes are backported, so compare the
 # installed apk version against the per-branch fixed version with apk's own
@@ -154,17 +170,10 @@ openssh_fix_status() {
         esac
         return
     fi
-    # Non-Alpine musl: compare upstream OpenSSH version against 10.6p2.
-    v=$(get_sshd_version | grep -oiE 'OpenSSH_[0-9]+\.[0-9]+(p[0-9]+)?' | head -1 | sed 's/OpenSSH_//I')
+    # Non-Alpine musl: compare the upstream OpenSSH version against 10.6p2.
+    v=$(get_sshd_version)
     [ -z "$v" ] && { echo unknown; return; }
-    maj=$(echo "$v" | cut -d. -f1)
-    min=$(echo "$v" | sed -E 's/^[0-9]+\.([0-9]+).*/\1/')
-    p=$(echo "$v" | grep -oE 'p[0-9]+' | tr -d p); p=${p:-0}
-    { [ "$maj" -gt 10 ]; } 2>/dev/null && { echo patched; return; }
-    { [ "$maj" -lt 10 ]; } 2>/dev/null && { echo unpatched; return; }
-    { [ "$min" -gt 6 ]; } 2>/dev/null && { echo patched; return; }
-    { [ "$min" -lt 6 ]; } 2>/dev/null && { echo unpatched; return; }
-    { [ "$p" -ge 2 ]; } 2>/dev/null && echo patched || echo unpatched
+    version_is_patched "$v"
 }
 
 # ----- verdict (pure function of the facts; unit-tested) ---------------------
