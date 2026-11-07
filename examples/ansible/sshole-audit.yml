@@ -1,7 +1,9 @@
 ---
-# Run the are-you-an-ssh-hole detector across an inventory of hosts.
+# Run the are-you-an-ssh-hole detector across an inventory of hosts and write
+# one aggregated JSON report.
 #
 #   ansible-playbook -i inventory.ini sshole-audit.yml
+#   ansible-playbook -i inventory.ini sshole-audit.yml -e sshole_report=/tmp/report.json
 #
 # It uses the `script` module, which transfers the audit and runs it on each
 # host, so it works even on minimal Alpine images that have no Python (standard
@@ -11,12 +13,21 @@
 # The isolation crypt() probe needs python3 or a C compiler on the target. If a
 # host has neither, musl boxes come back NEEDS_REVIEW rather than a definitive
 # verdict. Pass -e sshole_install_crypt_helper=true to install python3 first.
+#
+# Output:
+#   - a per-host verdict line,
+#   - an aggregated report written on the control node (default sshole-report.json),
+#     schema are-you-an-ssh-hole-fleet/v1, with a summary and a hosts array,
+#   - a non-zero exit if any host is VULNERABLE (the play fails for those hosts).
+# Hosts that are unreachable over SSH appear in Ansible's run recap as
+# "unreachable" rather than in the report (no task can run on them).
 - name: Audit hosts for sshole (CVE-2026-123158)
   hosts: all
   gather_facts: false
   become: true
   vars:
     sshole_install_crypt_helper: false
+    sshole_report: sshole-report.json
   tasks:
     - name: Optionally install a crypt() helper for a definitive musl result
       when: sshole_install_crypt_helper | bool
@@ -27,9 +38,9 @@
         fi
       changed_when: false
 
-    - name: Run the are-you-an-ssh-hole audit
+    - name: Run the are-you-an-ssh-hole audit (JSON)
       ansible.builtin.script:
-        cmd: "{{ playbook_dir }}/../../are-you-an-ssh-hole/are-you-an-ssh-hole.sh"
+        cmd: "{{ playbook_dir }}/../../are-you-an-ssh-hole/are-you-an-ssh-hole.sh --json"
       register: audit
       changed_when: false
       failed_when: false
@@ -38,9 +49,38 @@
       ansible.builtin.set_fact:
         sshole_verdict: "{{ {0: 'NOT_VULNERABLE', 1: 'VULNERABLE', 2: 'NEEDS_REVIEW'}.get(audit.rc | int, 'ERROR (rc=' ~ audit.rc ~ ')') }}"
 
-    - name: Report verdict and full audit output
+    - name: Keep this host's record (parsed JSON, or a synthesized one)
+      ansible.builtin.set_fact:
+        sshole_record: >-
+          {{ (audit.stdout | from_json)
+             if ((audit.stdout | default('') | trim) is match('\{'))
+             else {'host': inventory_hostname, 'verdict': sshole_verdict, 'evidence': none} }}
+
+    - name: Report verdict
       ansible.builtin.debug:
-        msg: "{{ [inventory_hostname ~ ': ' ~ sshole_verdict] + audit.stdout_lines }}"
+        msg: "{{ inventory_hostname }}: {{ sshole_verdict }}"
+
+    - name: Write the aggregated fleet report on the control node
+      run_once: true
+      delegate_to: localhost
+      become: false
+      vars:
+        records: "{{ ansible_play_hosts | map('extract', hostvars, 'sshole_record') | select('defined') | list }}"
+      ansible.builtin.copy:
+        dest: "{{ sshole_report }}"
+        mode: "0644"
+        content: >-
+          {{ {
+            'schema': 'are-you-an-ssh-hole-fleet/v1',
+            'generated_at': lookup('pipe', 'date -u +%Y-%m-%dT%H:%M:%SZ'),
+            'summary': {
+              'total': records | length,
+              'vulnerable': records | selectattr('verdict', 'equalto', 'VULNERABLE') | list | length,
+              'needs_review': records | selectattr('verdict', 'equalto', 'NEEDS_REVIEW') | list | length,
+              'not_vulnerable': records | selectattr('verdict', 'equalto', 'NOT_VULNERABLE') | list | length
+            },
+            'hosts': records
+          } | to_nice_json }}
 
     - name: Flag vulnerable hosts (fails the play for those hosts)
       ansible.builtin.assert:

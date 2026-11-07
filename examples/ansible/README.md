@@ -10,11 +10,20 @@ runner.
 ```sh
 # edit inventory.ini to list your own hosts
 ansible-playbook -i inventory.ini sshole-audit.yml
+ansible-playbook -i inventory.ini sshole-audit.yml -e sshole_report=/tmp/report.json
 ```
 
-Each host prints a verdict and the full audit report, and the play **fails for
-any host that is `VULNERABLE`** — so a non-zero playbook exit means at least one
-host needs patching, which is handy in CI or a cron job.
+Each host prints a verdict, and the play **fails for any host that is
+`VULNERABLE`** — so a non-zero playbook exit means at least one host needs
+patching, which is handy in CI or a cron job.
+
+### Aggregated report
+
+The run also writes one JSON report on the control node (default
+`sshole-report.json`, override with `-e sshole_report=PATH`) — schema
+`are-you-an-ssh-hole-fleet/v1`, the same shape the fleet runner's `--json`
+produces: a `summary` with counts and a `hosts` array of per-host records. This
+is your fleet-wide "what still needs patching" artifact.
 
 ## Notes
 
@@ -28,3 +37,6 @@ host needs patching, which is handy in CI or a cron job.
   target. Without one, musl hosts report `NEEDS_REVIEW` instead of a definitive
   verdict. Add `-e sshole_install_crypt_helper=true` to install `python3` first.
 - **Exit codes** (per host): `0` NOT_VULNERABLE, `1` VULNERABLE, `2` NEEDS_REVIEW.
+- **Unreachable hosts:** a host Ansible can't SSH to appears in the run recap as
+  `unreachable` rather than in the JSON report (no task can run on it). The fleet
+  runner, by contrast, synthesizes a record for such hosts.
