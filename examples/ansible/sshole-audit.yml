@@ -1,0 +1,49 @@
+---
+# Run the are-you-an-ssh-hole detector across an inventory of hosts.
+#
+#   ansible-playbook -i inventory.ini sshole-audit.yml
+#
+# It uses the `script` module, which transfers the audit and runs it on each
+# host, so it works even on minimal Alpine images that have no Python (standard
+# Ansible modules would not). A definitive /etc/shadow read needs root, hence
+# `become: true`.
+#
+# The isolation crypt() probe needs python3 or a C compiler on the target. If a
+# host has neither, musl boxes come back NEEDS_REVIEW rather than a definitive
+# verdict. Pass -e sshole_install_crypt_helper=true to install python3 first.
+- name: Audit hosts for sshole (CVE-2026-123158)
+  hosts: all
+  gather_facts: false
+  become: true
+  vars:
+    sshole_install_crypt_helper: false
+  tasks:
+    - name: Optionally install a crypt() helper for a definitive musl result
+      when: sshole_install_crypt_helper | bool
+      ansible.builtin.raw: |
+        if command -v apk >/dev/null 2>&1; then apk add --no-cache python3;
+        elif command -v apt-get >/dev/null 2>&1; then apt-get update && apt-get install -y python3;
+        elif command -v dnf >/dev/null 2>&1; then dnf install -y python3;
+        fi
+      changed_when: false
+
+    - name: Run the are-you-an-ssh-hole audit
+      ansible.builtin.script:
+        cmd: "{{ playbook_dir }}/../../are-you-an-ssh-hole/are-you-an-ssh-hole.sh"
+      register: audit
+      changed_when: false
+      failed_when: false
+
+    - name: Determine verdict from the exit code
+      ansible.builtin.set_fact:
+        sshole_verdict: "{{ {0: 'NOT_VULNERABLE', 1: 'VULNERABLE', 2: 'NEEDS_REVIEW'}.get(audit.rc | int, 'ERROR (rc=' ~ audit.rc ~ ')') }}"
+
+    - name: Report verdict and full audit output
+      ansible.builtin.debug:
+        msg: "{{ [inventory_hostname ~ ': ' ~ sshole_verdict] + audit.stdout_lines }}"
+
+    - name: Flag vulnerable hosts (fails the play for those hosts)
+      ansible.builtin.assert:
+        that: audit.rc | int != 1
+        fail_msg: "{{ inventory_hostname }} is VULNERABLE to sshole (CVE-2026-123158) — patch now"
+        success_msg: "{{ inventory_hostname }}: {{ sshole_verdict }}"
